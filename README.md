@@ -1,2 +1,2 @@
-# RubyFTP
-Ruby FTP
+# VolcanoFTP
+A FTP server project for school ETNA !
