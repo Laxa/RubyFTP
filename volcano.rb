@@ -26,10 +26,15 @@ class VolcanoFtp
     @tsocket = nil
 
     # logger part
-    @log = Logger.new('logging.log')
+    file = File.open('logging.log', File::WRONLY | File::TRUNC | File::CREAT)
+    @log = Logger.new(file)
     @log.level = Logger::DEBUG
-    puts "Server ready to listen for clients on port #{port}"
-    @log.info "Server ready to listen for clients on port #{port}"
+    @log.progname = 'VolcanoFTP'
+    @stdout = Logger.new(STDOUT)
+    @stdout.level = Logger::DEBUG
+    @stdout.progname = 'VolcanoFTP'
+    @stdout.info "Server is listening on port #{port}"
+    @log.info "Server is listening on port #{port}"
   end
 
   def run
@@ -39,34 +44,47 @@ class VolcanoFtp
         @pids.each do |pid|
           if not Process.waitpid(pid, Process::WNOHANG).nil?
             ####
-            # Do stuff with newly terminated processes here
+            # Gather data/stats here for last terminated process
             ####
             @pids.delete(pid)
           end
         end
-        if !@pids.count.zero?
-          puts "Currently connected clients : #{@pids}"
-        end
+#        if !@pids.count.zero?
+#         puts "Currently connected clients : #{@pids}"
+#        end
       else
         @cs,  = @socket.accept
         peeraddr = @cs.peeraddr.dup
         @pids << Kernel.fork do
-          puts "[#{Process.pid}] Instanciating connection from #{@cs.peeraddr[2]}:#{@cs.peeraddr[1]}"
-          @log.info "[#{Process.pid}] Instanciating connection from #{@cs.peeraddr[2]}:#{@cs.peeraddr[1]}"
-          @cs.write "220-\r\n\r\n Welcome to Volcano FTP server !\r\n\r\n220 Connected\r\n"
+          @stdout.info "Instanciating connection from #{@cs.peeraddr[2]}:#{@cs.peeraddr[1]}"
+          @log.info "Instanciating connection from #{@cs.peeraddr[2]}:#{@cs.peeraddr[1]}"
+          @cs.write "220 Connected to VolcanoFTP\r\n"
           while not (line = @cs.gets).nil?
-            puts "[#{Process.pid}] Client sent : --#{line}--"
-            @log.info "Client sent : --#{line}--"
             begin
-            rescue RunTimeError => e
-              @log.fatal "Client encountered a problem while talking with server : #{e}"
-            end
-            ####
+              if not line.end_with? "\r\n"
+                @stdout.info "Client sent a badly formated input : #{line}"
+                @log.info "Client sent a badly formated input : #{line}"
+              end
+              while line.end_with? "\r\n"
+                line = line[0..-2]
+              end
+              cmd = 'ftp_' << line.split.first
+              if self.respond_to? cmd
+                send(cmd)
+              else
+                ftp_502
+              end
+              @stdout.info "Client sent : #{line}"
+              @log.info "Client sent : #{line}"
             # Handle commands here
-            ####
+            rescue RuntimeError => e
+              @log.fatal "Client encountered a problem while talking with server : #{e}"
+              @cs.close
+              Kernel.exit!
+            end
           end
-          puts "[#{Process.pid}] Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
-          @log.info "[#{Process.pid}] Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
+          @stdout.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
+          @log.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
           @cs.close
           Kernel.exit!
         end
@@ -88,7 +106,7 @@ protected
 
   def ftp_502(*args)
     @cs.write "502 Command not implemented\r\n"
-    $log.info "502 Command not implemented\r\n"
+    @log.info "502 Command not implemented\r\n"
   end
 
   def ftp_exit(args)
