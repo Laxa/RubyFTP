@@ -15,7 +15,7 @@ MAX_PORT = 65534
 class VolcanoFtp
   def initialize(port = 21)
     # Prepare instance
-    if Process.euid != 1 and port < 1024
+    if Process.euid != 0 and port < 1024
       raise 'You need root privilege to bind on port < 1024'
     end
     @socket = TCPServer.new port
@@ -142,7 +142,8 @@ end
 $0 = 'volcanoFTP'
 
 begin
-  ftp = VolcanoFtp.new(ARGV[0].to_i)
+  port = ARGV[0].to_i.zero? ? 21 : ARGV[0].to_i
+  ftp = VolcanoFtp.new(port)
   ftp.run
 rescue SystemExit, Interrupt
   puts 'Caught CTRL+C, exiting'
