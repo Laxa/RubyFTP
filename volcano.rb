@@ -85,16 +85,20 @@ class VolcanoFtp
         line = line[0..-2]
       end
       @log.info "[server<-client]: #{line}"
-      cmd = 'ftp_' << line.split.first
+      cmd = 'ftp_' << line.split.first.downcase
       if self.respond_to?(cmd, true)
         send(cmd, line.split.drop(1))
       else
-        ftp_not_yet_implemented(line)
+        ftp_not_yet_implemented
       end
     end
   end
 
-  def ftp_not_yet_implemented(*args)
+  def ftp_noop
+    send_to_client_and_log(200, "OK")
+  end
+
+  def ftp_not_yet_implemented
     send_to_client_and_log(502, "Not yet implemented")
   end
 
@@ -102,11 +106,11 @@ class VolcanoFtp
     send_to_client_and_log(221, "Thank you for using VolcanoFTP")
   end
 
-  def ftp_USER(args)
+  def ftp_user(args)
     send_to_client_and_log(230, "You are now logged in as Anonymous")
   end
 
-  def ftp_PWD(args)
+  def ftp_pwd(args)
     send_to_client_and_log(257, @dir)
   end
 
