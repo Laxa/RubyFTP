@@ -28,17 +28,14 @@ class VolcanoFtp
     @tsocket = nil
 
     # logger part
-    file = File.open('logging.log', File::WRONLY | File::TRUNC | File::CREAT)
-    @log = Logger.new MultiIO.new(STDOUT, file)
+    # file = File.open('logging.log', File::WRONLY | File::TRUNC | File::CREAT)
+    @log = Logger.new MultiIO.new(STDOUT)
     @log.level = Logger::DEBUG
     @log.progname = 'VolcanoFTP'
     @log.formatter = proc do |severity, datetime, progname, msg|
       "[#{datetime} ##{Process.pid}] #{severity} -- #{progname}: #{msg}\n"
     end
     @log.info "Server is listening on port #{port}"
-
-    # change that to root of FTP folder within yaml config file
-    Dir.chdir(__dir__ + '/root')
   end
 
   def run
@@ -46,10 +43,9 @@ class VolcanoFtp
       selectResult = IO.select([@socket], nil, nil, 1)
       if selectResult == nil or selectResult[0].include?(@socket) == false
         @pids.each do |pid|
-          if not Process.waitpid(pid, Process::WNOHANG).nil?
-            ####
+          unless Process.waitpid(pid, Process::WNOHANG).nil?
             # Gather data/stats here for last terminated process
-            ####
+            # puts "deleteting pid #{pid}"
             @pids.delete(pid)
           end
         end
@@ -58,29 +54,12 @@ class VolcanoFtp
         peeraddr = @cs.peeraddr.dup
         @pids << Kernel.fork do
           begin
-            @log.info "Instanciating connection from #{@cs.peeraddr[2]}:#{@cs.peeraddr[1]}"
-            @cs.write "220 Connected to VolcanoFTP\r\n"
-            while not (line = @cs.gets).nil?
-              if not line.end_with? "\r\n"
-                @log.warn "[server<-client]: #{line}"
-              end
-              while line.end_with? "\r\n"
-                line = line[0..-2]
-              end
-              @log.info "[server<-client]: #{line}"
-              cmd = 'ftp_' << line.split.first
-              if self.respond_to?(cmd, true)
-                send(cmd, line.split.delete(0))
-              else
-                ftp_502(line)
-              end
-              # Handle commands here
-            end
-          rescue RuntimeError => e
-            @log.fatal "Client encountered a problem while talking with server : #{e}"
-            @cs.close
-            Kernel.exit!
-          rescue Exception
+            handle_client
+          rescue SignalException => e
+            @log.warn "Caught signal #{e}"
+          rescue Exception => e
+            @log.fatal "Encountered Exception : #{e}"
+          ensure
             ftp_exit
             @log.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
             @cs.close
@@ -93,29 +72,47 @@ class VolcanoFtp
 
   protected
 
-  def ftp_syst(args)
-    @cs.write "215 UNIX Type: L8\r\n"
-    @log.info "[server->client]: 215 UNIX Type: L8"
+  def handle_client
+    @log.info "Instanciating connection from #{@cs.peeraddr[2]}:#{@cs.peeraddr[1]}"
+    send_to_client_and_log(220, "Connected to VolcanoFTP")
+    # client connection is on his root folder
+    @dir = '/'
+    while not (line = @cs.gets).nil?
+      unless line.end_with? "\r\n"
+        @log.warn "[server<-client]: #{line}"
+      end
+      while line.end_with? "\r\n"
+        line = line[0..-2]
+      end
+      @log.info "[server<-client]: #{line}"
+      cmd = 'ftp_' << line.split.first
+      if self.respond_to?(cmd, true)
+        send(cmd, line.split.drop(1))
+      else
+        ftp_not_yet_implemented(line)
+      end
+    end
   end
 
-  def ftp_noop(args)
-    @cs.write "200 Don't worry my lovely client, I'm here ;)\r\n"
-    @log.info "[server->client]: 200 Don't worry my lovely client, I'm here ;)"
-  end
-
-  def ftp_502(*args)
-    @cs.write "502 Command not implemented\r\n"
-    @log.info "[server->client]: 502 Command not implemented"
+  def ftp_not_yet_implemented(*args)
+    send_to_client_and_log(502, "Not yet implemented")
   end
 
   def ftp_exit(args = nil)
-    @cs.write "221 Thank you for using VolcanoFTP\r\n"
-    @log.info "[server->client]: 221 Thank you for using Volcano FTP"
+    send_to_client_and_log(221, "Thank you for using VolcanoFTP")
   end
 
   def ftp_USER(args)
-    @cs.write "230 You are now logged in as Anonymous\r\n"
-    @log.info "[server->client]: 230 You are now logged in as Anonymous"
+    send_to_client_and_log(230, "You are now logged in as Anonymous")
+  end
+
+  def ftp_PWD(args)
+    send_to_client_and_log(257, @dir)
+  end
+
+  def send_to_client_and_log(code, data)
+    @cs.write "#{code} #{data}\r\n"
+    @log.info "[server->client]: #{code} #{data}"
   end
 
   private
@@ -150,7 +147,7 @@ rescue SystemExit, Interrupt
 rescue RuntimeError => e
   puts "VolcanoFTP encountered a RunTimeError : #{e}"
 end
-# killing all forked processes
 
+# killing all forked processes
 puts "Killing all processes now..."
 `pkill volcanoFTP`
