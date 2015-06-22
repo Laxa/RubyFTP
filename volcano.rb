@@ -4,6 +4,7 @@ require 'socket'
 require 'yaml'
 require 'logger'
 require 'timeout'
+require 'stringio'
 include Socket::Constants
 
 # Volcano FTP contants
@@ -80,6 +81,7 @@ class VolcanoFtp
     send_to_client_and_log(220, "Connected to VolcanoFTP")
     # client connection is on his root folder
     @dir = '/'
+    @rootFolder = Dir.pwd + '/root'
     until (line = @cs.gets).nil?
       unless line.end_with? "\r\n"
         @log.warn "[server<-client]: #{line}"
@@ -98,20 +100,46 @@ class VolcanoFtp
     @log.warn 'Client killed connection to server'
   end
 
+  def transmit_data(dataIO)
+    send_to_client_and_log(150, 'Opening binary data connection')
+    begin
+      @tsocket = TCPSocket.new('localhost', @tport)
+    rescue => e
+      return send_to_client_and_log(425, "#{e}")
+    end
+    begin
+      until (data = dataIO.gets).nil?
+        @tsocket.write(data)
+      end
+    rescue => e
+      send_to_client_and_log(426, "#{e}")
+    ensure
+      @tsocket.close
+    end
+    send_to_client_and_log(226, 'Done')
+  end
+
   def unexpected
     send_to_client_and_log(421, 'Something unexpected happened')
   end
 
   def ftp_list(args)
     unless (args.first.nil?)
+      path = File.expand_path(@rootFolder, args.first)
     else
-      # no selection
+      path = File.expand_path(@rootFolder, @dir)
     end
-    # TODO
+    cmd = "ls -l #{path}"
+    if (cmd.length.zero?)
+      return send_to_client_and_log(500, 'Problem occured')
+    end
+    dataIO = StringIO.new(`#{cmd}`)
+    transmit_data(dataIO)
   end
 
   def ftp_cwd(args)
-    # TODO
+    # NYI
+    ftp_not_yet_implemented
   end
 
   def ftp_syst(args)
@@ -143,12 +171,16 @@ class VolcanoFtp
   end
 
   def ftp_pasv(args)
-    send_to_client_and_log(502, 'Not implemented')
+    ftp_not_yet_implemented
   end
 
   def ftp_port(args)
-    args = args.first.split(/,/)
-    @tport = args[4].to_i << 8 | args[5].to_i
+    begin
+      args = args.first.split(/,/)
+      @tport = args[4].to_i << 8 | args[5].to_i
+    rescue => e
+      send_to_client_and_log(500, "#{e}")
+    end
     send_to_client_and_log(200, "Port is set to #{@tport}")
   end
 
