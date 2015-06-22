@@ -3,11 +3,12 @@
 require 'socket'
 require 'yaml'
 require 'logger'
+require 'timeout'
 include Socket::Constants
 
 # Volcano FTP contants
-BINARY_MODE = 0
-ASCII_MODE = 1
+BINARY_MODE = 1
+ASCII_MODE = 0
 MIN_PORT = 1025
 MAX_PORT = 65534
 
@@ -26,6 +27,7 @@ class VolcanoFtp
     @pids = []
     @transfert_type = BINARY_MODE
     @tsocket = nil
+    @tport = nil
 
     # logger part
     # file = File.open('logging.log', File::WRONLY | File::TRUNC | File::CREAT)
@@ -57,10 +59,11 @@ class VolcanoFtp
             handle_client
           rescue SignalException => e
             @log.warn "Caught signal #{e}"
+            unexpected
           rescue Exception => e
             @log.fatal "Encountered Exception : #{e}"
+            unexpected
           ensure
-            ftp_exit
             @log.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
             @cs.close
             Kernel.exit!
@@ -77,7 +80,7 @@ class VolcanoFtp
     send_to_client_and_log(220, "Connected to VolcanoFTP")
     # client connection is on his root folder
     @dir = '/'
-    while not (line = @cs.gets).nil?
+    until (line = @cs.gets).nil?
       unless line.end_with? "\r\n"
         @log.warn "[server<-client]: #{line}"
       end
@@ -92,22 +95,85 @@ class VolcanoFtp
         ftp_not_yet_implemented
       end
     end
+    @log.warn 'Client killed connection to server'
+  end
+
+  def unexpected
+    send_to_client_and_log(421, 'Something unexpected happened')
+  end
+
+  def ftp_list(args)
+    unless (args.first.nil?)
+    else
+      # no selection
+    end
+    # TODO
+  end
+
+  def ftp_cwd(args)
+    # TODO
+  end
+
+  def ftp_syst(args)
+    send_to_client_and_log(215, 'UNIX Type: L8')
   end
 
   def ftp_noop
-    send_to_client_and_log(200, "OK")
+    send_to_client_and_log(200, 'OK')
   end
 
   def ftp_not_yet_implemented
-    send_to_client_and_log(502, "Not yet implemented")
+    send_to_client_and_log(502, 'Not yet implemented')
   end
 
   def ftp_exit(args = nil)
-    send_to_client_and_log(221, "Thank you for using VolcanoFTP")
+    send_to_client_and_log(221, 'Thank you for using VolcanoFTP')
+  end
+
+  def ftp_quit(args)
+    ftp_exit(args)
+  end
+
+  def ftp_type(args)
+    if (args.first.downcase == 'i')
+      send_to_client_and_log(200, "Transfer type is set to 'Binary data'")
+    else
+      send_to_client_and_log(504, 'Only binary data transfer type accepted')
+    end
+  end
+
+  def ftp_pasv(args)
+    send_to_client_and_log(502, 'Not implemented')
+  end
+
+  def ftp_port(args)
+    args = args.first.split(/,/)
+    @tport = args[4].to_i << 8 | args[5].to_i
+    send_to_client_and_log(200, "Port is set to #{@tport}")
+  end
+
+  def is_port_open?(port)
+    unless (@tsocket.nil?)
+      @tsocket.close
+    end
+    begin
+      Timeout::timeout(1) do
+        begin
+          @tsocket = TCPSocket.new('127.0.0.1', port)
+          puts "toto"
+          return true
+        rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH
+          return false
+        end
+      end
+    rescue Timeout::Error
+      puts "timeout"
+    end
+    return false
   end
 
   def ftp_user(args)
-    send_to_client_and_log(230, "You are now logged in as Anonymous")
+    send_to_client_and_log(230, 'You are now logged in as Anonymous')
   end
 
   def ftp_pwd(args)
