@@ -179,7 +179,7 @@ class VolcanoFtp
       args = args.first.split(/,/)
       @tport = args[4].to_i << 8 | args[5].to_i
     rescue => e
-      send_to_client_and_log(500, "#{e}")
+      return send_to_client_and_log(500, "#{e}")
     end
     send_to_client_and_log(200, "Port is set to #{@tport}")
   end
