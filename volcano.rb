@@ -99,6 +99,7 @@ class VolcanoFtp
   end
 
   def transmit_data(dataIO)
+    return send_to_client_and_log(451, 'Need PORT command') if @tport.nil?
     send_to_client_and_log(150, 'Opening binary data connection')
     begin
       @tsocket = TCPSocket.new('localhost', @tport)
@@ -113,6 +114,7 @@ class VolcanoFtp
       send_to_client_and_log(426, "#{e}")
     ensure
       @tsocket.close
+      @tport = nil
     end
     send_to_client_and_log(226, 'Done')
   end
@@ -206,6 +208,7 @@ class VolcanoFtp
       args = args.first.split(/,/)
       @tport = args[4].to_i << 8 | args[5].to_i
     rescue => e
+      @tport = nil
       return send_to_client_and_log(500, "#{e}")
     end
     send_to_client_and_log(200, "Port is set to #{@tport}")
