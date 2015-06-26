@@ -1,0 +1,19 @@
+# Fichier a remove quand git passe public
+Notes sur le VolcanoFTP
+
+Commandes implementees :
+- PWD
+- QUIT
+- LIST
+
+Bonus :
+- ne sors pas du @rootFolder
+- Kill des connections propre
+- Logger sur STDOUT
+- Gestion d'erreurs
+- Fonctionne avec FileZilla
+
+
+TODO :
+
+Gerer listing fichiers avec espaces
