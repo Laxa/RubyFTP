@@ -5,19 +5,11 @@ require 'yaml'
 require 'logger'
 require 'timeout'
 require 'stringio'
-require 'shellwords'
 include Socket::Constants
-
-# Volcano FTP contants
-BINARY_MODE = 1
-ASCII_MODE = 0
-MIN_PORT = 1025
-MAX_PORT = 65534
 
 # Volcano FTP class
 class VolcanoFtp
   def initialize(port = 21)
-    # Prepare instance
     if Process.euid != 0 and port < 1024
       raise 'You need root privilege to bind on port < 1024'
     end
@@ -27,7 +19,6 @@ class VolcanoFtp
     Dir.chdir(__dir__)
 
     @pids = []
-    @transfert_type = BINARY_MODE
     @tsocket = nil
     @tport = nil
 
@@ -138,8 +129,7 @@ class VolcanoFtp
     else
       path = @rootFolder + @cwd
     end
-    path = Shellwords.escape(path)
-    data = `ls -la #{path}`
+    data = `ls -la '#{path}'`
     @log.debug "#{path}"
     if (data.length.zero? or data.nil?)
       return send_to_client_and_log(500, 'Problem occured')
@@ -248,7 +238,7 @@ class VolcanoFtp
 
   # Print Working Directory
   def ftp_pwd(args)
-    send_to_client_and_log(257, @cwd)
+    send_to_client_and_log(257, "\"#{@cwd}\" is current directory")
   end
 
   def send_to_client_and_log(code, data)
