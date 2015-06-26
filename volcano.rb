@@ -5,6 +5,7 @@ require 'yaml'
 require 'logger'
 require 'timeout'
 require 'stringio'
+require 'shellwords'
 include Socket::Constants
 
 # Volcano FTP contants
@@ -33,6 +34,7 @@ class VolcanoFtp
     # logger part
     # file = File.open('logging.log', File::WRONLY | File::TRUNC | File::CREAT)
     @log = Logger.new MultiIO.new(STDOUT)
+    # make that a configurable settings in the YAML file
     @log.level = Logger::DEBUG
     @log.progname = 'VolcanoFTP'
     @log.formatter = proc do |severity, datetime, progname, msg|
@@ -80,8 +82,11 @@ class VolcanoFtp
     @log.info "Instanciating connection from #{@cs.peeraddr[2]}:#{@cs.peeraddr[1]}"
     send_to_client_and_log(220, "Connected to VolcanoFTP")
     # client connection is on his root folder
-    @dir = '/'
+    @cwd = '/'
+    # rootFolder HAS to be absolute path
+    # if yaml config is done, we need to be sure we have an absolute path
     @rootFolder = Dir.pwd + '/root'
+    @rootFolder = '/Users/laxa/Documents'
     until (line = @cs.gets).nil?
       unless line.end_with? "\r\n"
         @log.warn "[server<-client]: #{line}"
@@ -91,7 +96,9 @@ class VolcanoFtp
       end
       @log.info "[server<-client]: #{line}"
       cmd = 'ftp_' << line.split.first.downcase
-      if self.respond_to?(cmd, true)
+      if cmd == 'ftp_quit'
+        return ftp_exit
+      elsif self.respond_to?(cmd, true)
         send(cmd, line.split.drop(1))
       else
         ftp_not_yet_implemented
@@ -123,22 +130,48 @@ class VolcanoFtp
     send_to_client_and_log(421, 'Something unexpected happened')
   end
 
+  # List the Working directory if no args is specified, otherwise, list folder/file
   def ftp_list(args)
+    # we use '.' as ref to be sure we don't go out of ftp folder
     unless (args.first.nil?)
-      path = File.expand_path(@rootFolder, args.first)
+      path = @rootFolder + File.expand_path(args.first, @cwd)
     else
-      path = File.expand_path(@rootFolder, @dir)
+      path = @rootFolder + @cwd
     end
-    cmd = "ls -l #{path}"
-    if (cmd.length.zero?)
+    path = Shellwords.escape(path)
+    data = `ls -la #{path}`
+    @log.debug "#{path}"
+    if (data.length.zero? or data.nil?)
       return send_to_client_and_log(500, 'Problem occured')
     end
-    dataIO = StringIO.new(`#{cmd}`)
+    dataIO = StringIO.new(data)
     transmit_data(dataIO)
   end
 
+  # Change Working Directory
+  # client is sending relative path on rootFolder
   def ftp_cwd(args)
-    # NYI
+    return send_to_client_and_log(501, 'No argument') if args.first.nil?
+    target = File.expand_path(args.join(' '), @cwd)
+    @log.debug "#{target}"
+    if File.directory? @rootFolder + target
+      @cwd = target
+      @log.debug "New cwd: #{@cwd}"
+      return send_to_client_and_log(250, "CWD set to #{@cwd}")
+    else
+      return send_to_client_and_log(500, 'Target is not valid')
+    end
+  end
+
+  # store file
+  def ftp_stor(args)
+    # TODO
+    ftp_not_yet_implemented
+  end
+
+  # retrieve file
+  def ftp_retr(args)
+    # TODO
     ftp_not_yet_implemented
   end
 
@@ -146,6 +179,7 @@ class VolcanoFtp
     send_to_client_and_log(215, 'UNIX Type: L8')
   end
 
+  # check connection is alive
   def ftp_noop
     send_to_client_and_log(200, 'OK')
   end
@@ -162,6 +196,7 @@ class VolcanoFtp
     ftp_exit(args)
   end
 
+  # Define transfer type between client and server
   def ftp_type(args)
     if (args.first.downcase == 'i')
       send_to_client_and_log(200, "Transfer type is set to 'Binary data'")
@@ -170,10 +205,12 @@ class VolcanoFtp
     end
   end
 
+  # Define passive mode, client connect to server for data transmissions
   def ftp_pasv(args)
     ftp_not_yet_implemented
   end
 
+  # define port to use for data transmission, only handle active mode in Volcano
   def ftp_port(args)
     begin
       args = args.first.split(/,/)
@@ -204,12 +241,14 @@ class VolcanoFtp
     return false
   end
 
+  # Handle basic AUTH
   def ftp_user(args)
     send_to_client_and_log(230, 'You are now logged in as Anonymous')
   end
 
+  # Print Working Directory
   def ftp_pwd(args)
-    send_to_client_and_log(257, @dir)
+    send_to_client_and_log(257, @cwd)
   end
 
   def send_to_client_and_log(code, data)
@@ -241,6 +280,7 @@ end
 $0 = 'volcanoFTP'
 
 begin
+  # using standart FTP port if none is specified in CLI
   port = ARGV[0].to_i.zero? ? 21 : ARGV[0].to_i
   ftp = VolcanoFtp.new(port)
   ftp.run
