@@ -104,19 +104,28 @@ class VolcanoFtp
     begin
       @tsocket = TCPSocket.new('localhost', @tport)
     rescue => e
+      dataIO.close
+      @tport = nil
       return send_to_client_and_log(425, "#{e}")
     end
     begin
+      transfered_bytes = 0
       until (data = dataIO.gets).nil?
         @tsocket.write(data)
+        transfered_bytes += data.size
       end
     rescue => e
       send_to_client_and_log(426, "#{e}")
     ensure
       @tsocket.close
       @tport = nil
+      dataIO.close
+      @log.info "Transfered #{transfered_bytes} bytes"
     end
     send_to_client_and_log(226, 'Done')
+  end
+
+  def receive_data()
   end
 
   def unexpected
@@ -136,8 +145,8 @@ class VolcanoFtp
     if (data.length.zero? or data.nil?)
       return send_to_client_and_log(500, 'Problem occured')
     end
-    dataIO = StringIO.new(data)
-    transmit_data(dataIO)
+    io = StringIO.new(data)
+    transmit_data(io)
   end
 
   # Change Working Directory
@@ -163,8 +172,12 @@ class VolcanoFtp
 
   # retrieve file
   def ftp_retr(args)
-    # TODO
-    ftp_not_yet_implemented
+    return send_to_client_and_log(501, 'No argument') if args.first.nil?
+    file = @rootFolder + File.expand_path(args.join(' '), @cwd)
+    @log.debug file
+    return send_to_client_and_log(451, 'File not found') unless File.exists?(file)
+    io = File.open(file, 'rb')
+    transmit_data(io)
   end
 
   def ftp_syst(args)
