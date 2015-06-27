@@ -77,6 +77,7 @@ class VolcanoFtp
     # rootFolder HAS to be absolute path
     # if yaml config is done, we need to be sure we have an absolute path
     @rootFolder = Dir.pwd + '/root'
+    # TEMP to test FTP server
     @rootFolder = '/Users/laxa/Documents'
     until (line = @cs.gets).nil?
       unless line.end_with? "\r\n"
@@ -125,7 +126,31 @@ class VolcanoFtp
     send_to_client_and_log(226, 'Done')
   end
 
-  def receive_data()
+  def receive_data(dataIO)
+    return send_to_client_and_log(451, 'Need PORT command') if @tport.nil?
+    send_to_client_and_log(150, 'Opening binary data connection')
+    begin
+      @tsocket = TCPSocket.new('localhost', @tport)
+    rescue => e
+      dataIO.close
+      @tport = nil
+      return send_to_client_and_log(425, "#{e}")
+    end
+    begin
+      transfered_bytes = 0
+      until (data = @tsocket.gets).nil?
+        dataIO.write(data)
+        transfered_bytes += data.size
+      end
+    rescue => e
+      send_to_client_and_log(426, "#{e}")
+    ensure
+      @tsocket.close
+      @tport = nil
+      dataIO.close
+      @log.info "Received #{transfered_bytes} bytes"
+    end
+    send_to_client_and_log(226, 'Done')
   end
 
   def unexpected
@@ -166,8 +191,13 @@ class VolcanoFtp
 
   # store file
   def ftp_stor(args)
-    # TODO
-    ftp_not_yet_implemented
+    return send_to_client_and_log(501, 'No argument') if args.first.nil?
+    file = @rootFolder + File.expand_path(args.join(' '), @cwd)
+    @log.debug file
+    return send_to_client_and_log(451, 'Dir not found') unless File.exist?(File.dirname(file))
+#    return send_to_client_and_log(451, 'File name already exist') if File.exist? file
+    io = File.open(file, 'wb')
+    receive_data(io)
   end
 
   # retrieve file

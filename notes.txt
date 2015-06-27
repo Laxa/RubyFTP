@@ -1,11 +1,21 @@
 # Fichier a remove quand git passe public
 Notes sur le VolcanoFTP
 
+TODO :
+- config.yaml
+- sauvegarder les datas de connection pour stats
+- script stop/start/restart avec gestion du pid
+- commandes utilisees par filezilla : FEAT / SIZE / MDTM / MKDIR / RENAME DIR
+- gestion nombre clients connectes
+- gerer autre que localhost en client
+- tester exposition en reseau
+
 Commandes implementees :
 - PWD
 - CWD
 - QUIT
 - LIST
+- RETR
 
 Bonus :
 - ne sors pas du @rootFolder
@@ -13,3 +23,4 @@ Bonus :
 - Logger sur STDOUT
 - Gestion d'erreurs
 - Fonctionne avec FileZilla
+- Commandes NOOP / SYST / TYPE / PORT / USER
