@@ -32,7 +32,13 @@ class VolcanoFtp
       "[#{datetime} ##{Process.pid}] #{severity} -- #{progname}: #{msg}\n"
     end
     @log.info "Server is listening on port #{port}"
+
+    @statfiles = File.open('stats.log', "a+")
+    @statfiles.write("#{Time.now} Server started\n")
+    @statfiles.close
   end
+
+
 
   def run
     while (42)
@@ -50,6 +56,10 @@ class VolcanoFtp
         peeraddr = @cs.peeraddr.dup
         @pids << Kernel.fork do
           begin
+            @statfiles = File.open('stats.log', "a+")
+            @logintime = Time.now
+            @statfiles.write("#{@logintime} Client connected\n")
+            @statfiles.close
             handle_client
           rescue SignalException => e
             @log.warn "Caught signal #{e}"
@@ -58,6 +68,12 @@ class VolcanoFtp
             @log.fatal "Encountered Exception : #{e}"
             unexpected
           ensure
+            @statfiles = File.open('stats.log', "a+")
+            @logouttime = Time.now
+            @statfiles.write("#{@logouttime} Client disconnected\n")
+            @duration = @logouttime - @logintime
+            @statfiles.write("login duration : #{@duration} seconds\n")
+            @statfiles.close
             @log.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
             @cs.close
             Kernel.exit!
