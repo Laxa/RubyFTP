@@ -1,5 +1,8 @@
 #!/usr/bin/env ruby
 
+require 'rubygems'
+require 'nokogiri'
+require 'securerandom'
 require 'socket'
 require 'yaml'
 require 'logger'
@@ -32,10 +35,7 @@ class VolcanoFtp
       "[#{datetime} ##{Process.pid}] #{severity} -- #{progname}: #{msg}\n"
     end
     @log.info "Server is listening on port #{port}"
-
-    @statfiles = File.open('stats.log', "a+")
-    @statfiles.write("#{Time.now} Server started\n")
-    @statfiles.close
+    @statfile = File.open("stat.xml", "a+")
   end
 
 
@@ -56,10 +56,14 @@ class VolcanoFtp
         peeraddr = @cs.peeraddr.dup
         @pids << Kernel.fork do
           begin
-            @statfiles = File.open('stats.log', "a+")
             @logintime = Time.now
-            @statfiles.write("#{@logintime} Client connected\n")
-            @statfiles.close
+            @sessionid = SecureRandom.hex(10)
+            @statxml = Nokogiri::XML::Builder.new do |xml|
+              xml.session {
+                xml.id_ @sessionid
+                xml.logintime_ @logintime
+              }
+            end
             handle_client
           rescue SignalException => e
             @log.warn "Caught signal #{e}"
@@ -68,12 +72,9 @@ class VolcanoFtp
             @log.fatal "Encountered Exception : #{e}"
             unexpected
           ensure
-            @statfiles = File.open('stats.log', "a+")
             @logouttime = Time.now
-            @statfiles.write("#{@logouttime} Client disconnected\n")
             @duration = @logouttime - @logintime
-            @statfiles.write("login duration : #{@duration} seconds\n")
-            @statfiles.close
+            @statxml = Nokogiri::XML::
             @log.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
             @cs.close
             Kernel.exit!
