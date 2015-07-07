@@ -9,14 +9,12 @@ include Socket::Constants
 
 # Volcano FTP class
 class VolcanoFtp
-  def initialize(port = 21)
-    if Process.euid != 0 and port < 1024
-      raise 'You need root privilege to bind on port < 1024'
-    end
-    @socket = TCPServer.new port
+  def initialize
+    config_yaml
+    @socket = TCPServer.new @port
     @socket.listen(42)
 
-    Dir.chdir(__dir__)
+#    Dir.chdir(__dir__)
 
     @pids = []
     @tsocket = nil
@@ -31,7 +29,27 @@ class VolcanoFtp
     @log.formatter = proc do |severity, datetime, progname, msg|
       "[#{datetime} ##{Process.pid}] #{severity} -- #{progname}: #{msg}\n"
     end
-    @log.info "Server is listening on port #{port}"
+    @log.info "Server is listening on port #{@port}"
+  end
+
+  def config_yaml
+  yaml_content = YAML.load_file('conf.yml')
+     if yaml_content["Port"].nil?
+      @port = 21
+      raise 'Port not defined.Port 21 used'
+    else
+      if Process.euid != 0 and yaml_content["Port"] < 1024
+        raise 'You need root privilege to bind on port < 1024'
+      else
+      @port = yaml_content["Port"]
+    end
+    end
+    @bind = yaml_content["Bind"]
+    if File.directory? yaml_content["Dir"]
+        @rootFolder = yaml_content["Dir"]
+    else
+      @rootFolder = '/'
+    end
   end
 
   def run
@@ -76,9 +94,7 @@ class VolcanoFtp
     @cwd = '/'
     # rootFolder HAS to be absolute path
     # if yaml config is done, we need to be sure we have an absolute path
-    @rootFolder = Dir.pwd + '/root'
-    # TEMP to test FTP server
-    @rootFolder = '/Users/laxa/Documents'
+       # TEMP to test FTP server
     until (line = @cs.gets).nil?
       unless line.end_with? "\r\n"
         @log.warn "[server<-client]: #{line}"
@@ -317,8 +333,7 @@ $0 = 'volcanoFTP'
 
 begin
   # using standart FTP port if none is specified in CLI
-  port = ARGV[0].to_i.zero? ? 21 : ARGV[0].to_i
-  ftp = VolcanoFtp.new(port)
+  ftp = VolcanoFtp.new()
   ftp.run
 rescue SystemExit, Interrupt
   puts 'Caught CTRL+C, exiting'
