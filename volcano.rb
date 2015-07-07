@@ -57,6 +57,8 @@ class VolcanoFtp
           begin
             @logintime = Time.now
             @sessionid = SecureRandom.hex(10)
+            @fileXml = Nokogiri::XML::DocumentFragment.parse ''
+            @file_node = Nokogiri::XML::Node.new("file",@fileXml)
             @filecount = 0
             handle_client
           rescue SignalException => e
@@ -66,32 +68,37 @@ class VolcanoFtp
             @log.fatal "Encountered Exception : #{e}"
             unexpected
           ensure
-            @logouttime = Time.now
-            @duration = @logouttime - @logintime
+            logouttime = Time.now
+            duration = logouttime - @logintime
             if File.exist?('stat.xml')
-              @xmlFile = File.read("stat.xml")
+              xmlFile = File.read("stat.xml")
             else
-              @xmlFile = '<volcano></volcano>'
+              xmlFile = '<volcano></volcano>'
             end
-            @xmlData = Nokogiri::XML.parse @xmlFile
-            @session_node = Nokogiri::XML::Node.new("session",@xmlData)
-            @session_node['id'] = @sessionid
-            @logintime_node = Nokogiri::XML::Node.new("logintime",@xmlData)
-            @logouttime_node = Nokogiri::XML::Node.new("logouttime",@xmlData)
-            @duration_node = Nokogiri::XML::Node.new("duration",@xmlData)
-            @filecount_node = Nokogiri::XML::Node.new("filecount",@xmlData)
-            @logintime_node.content = @logintime
-            @logouttime_node.content = @logouttime
-            @duration_node.content = @duration
-            @filecount_node.content = @filecount
-            @session_node << @logintime_node
-            @session_node << @logouttime_node
-            @session_node << @duration_node
-            @session_node << @filecount_node
-            @xmlData.root << @session_node
+            xmlData = Nokogiri::XML.parse xmlFile
+            session_node = Nokogiri::XML::Node.new("session",xmlData)
+            logintime_node = Nokogiri::XML::Node.new("logintime",xmlData)
+            logouttime_node = Nokogiri::XML::Node.new("logouttime",xmlData)
+            duration_node = Nokogiri::XML::Node.new("duration",xmlData)
+            filecount_node = Nokogiri::XML::Node.new("filecount",xmlData)
+
+            session_node['id'] = @sessionid
+            logintime_node.content = @logintime
+            logouttime_node.content = logouttime
+            duration_node.content = duration
+            filecount_node.content = @filecount
+
+            session_node << logintime_node
+            session_node << logouttime_node
+            session_node << duration_node
+            @file_node << filecount_node
+            session_node << @file_node
+            xmlData.root << session_node
+
             File.open('stat.xml', 'w') do |file|
-              file.print @xmlData.to_xml
+              file.print xmlData.to_xml
             end
+
             @log.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
             @cs.close
             Kernel.exit!
@@ -156,8 +163,11 @@ class VolcanoFtp
       @tport = nil
       dataIO.close
       @log.info "Transfered #{transfered_bytes} bytes"
+      file = Nokogiri::XML::Node.new("file#{@filecount}_size", @fileXml)
+      file.content = transfered_bytes
+      @file_node << file
+      @filecount += 1
     end
-    @filecount += 1
     send_to_client_and_log(226, 'Done')
   end
 
@@ -184,8 +194,11 @@ class VolcanoFtp
       @tport = nil
       dataIO.close
       @log.info "Received #{transfered_bytes} bytes"
+      file = Nokogiri::XML::Node.new("file#{@filecount}_size", @fileXml)
+      file.content = transfered_bytes
+      @file_node << file
+      @filecount += 1
     end
-    @filecount += 1
     send_to_client_and_log(226, 'Done')
   end
 
