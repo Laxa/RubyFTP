@@ -35,7 +35,6 @@ class VolcanoFtp
       "[#{datetime} ##{Process.pid}] #{severity} -- #{progname}: #{msg}\n"
     end
     @log.info "Server is listening on port #{port}"
-    @statfile = File.open("stat.xml", "a+")
   end
 
 
@@ -58,12 +57,7 @@ class VolcanoFtp
           begin
             @logintime = Time.now
             @sessionid = SecureRandom.hex(10)
-            @statxml = Nokogiri::XML::Builder.new do |xml|
-              xml.session {
-                xml.id_ @sessionid
-                xml.logintime_ @logintime
-              }
-            end
+            @filecount = 0
             handle_client
           rescue SignalException => e
             @log.warn "Caught signal #{e}"
@@ -74,7 +68,30 @@ class VolcanoFtp
           ensure
             @logouttime = Time.now
             @duration = @logouttime - @logintime
-            @statxml = Nokogiri::XML::
+            if File.exist?('stat.xml')
+              @xmlFile = File.read("stat.xml")
+            else
+              @xmlFile = '<volcano></volcano>'
+            end
+            @xmlData = Nokogiri::XML.parse @xmlFile
+            @session_node = Nokogiri::XML::Node.new("session",@xmlData)
+            @session_node['id'] = @sessionid
+            @logintime_node = Nokogiri::XML::Node.new("logintime",@xmlData)
+            @logouttime_node = Nokogiri::XML::Node.new("logouttime",@xmlData)
+            @duration_node = Nokogiri::XML::Node.new("duration",@xmlData)
+            @filecount_node = Nokogiri::XML::Node.new("filecount",@xmlData)
+            @logintime_node.content = @logintime
+            @logouttime_node.content = @logouttime
+            @duration_node.content = @duration
+            @filecount_node.content = @filecount
+            @session_node << @logintime_node
+            @session_node << @logouttime_node
+            @session_node << @duration_node
+            @session_node << @filecount_node
+            @xmlData.root << @session_node
+            File.open('stat.xml', 'w') do |file|
+              file.print @xmlData.to_xml
+            end
             @log.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
             @cs.close
             Kernel.exit!
@@ -95,7 +112,7 @@ class VolcanoFtp
     # if yaml config is done, we need to be sure we have an absolute path
     @rootFolder = Dir.pwd + '/root'
     # TEMP to test FTP server
-    @rootFolder = '/Users/laxa/Documents'
+    @rootFolder = Dir.pwd
     until (line = @cs.gets).nil?
       unless line.end_with? "\r\n"
         @log.warn "[server<-client]: #{line}"
@@ -140,6 +157,7 @@ class VolcanoFtp
       dataIO.close
       @log.info "Transfered #{transfered_bytes} bytes"
     end
+    @filecount += 1
     send_to_client_and_log(226, 'Done')
   end
 
@@ -167,6 +185,7 @@ class VolcanoFtp
       dataIO.close
       @log.info "Received #{transfered_bytes} bytes"
     end
+    @filecount += 1
     send_to_client_and_log(226, 'Done')
   end
 
