@@ -37,3 +37,4 @@ build/
 # logging file
 *log*
 *.xml
+notes.txt
