@@ -1,5 +1,8 @@
 #!/usr/bin/env ruby
 
+require 'rubygems'
+require 'nokogiri'
+require 'securerandom'
 require 'socket'
 require 'yaml'
 require 'logger'
@@ -10,76 +13,102 @@ include Socket::Constants
 # Volcano FTP class
 class VolcanoFtp
   def initialize
-    config_yaml
-    @socket = TCPServer.new @port
+    conf = config_yaml
+    if conf['Bind']
+      @socket = TCPServer.new(@bind, @port)
+    else
+      @socket = TCPServer.new @port
+    end
     @socket.listen(42)
 
-#    Dir.chdir(__dir__)
-
-    @pids = []
     @tsocket = nil
     @tport = nil
 
     # logger part
-    # file = File.open('logging.log', File::WRONLY | File::TRUNC | File::CREAT)
-    @log = Logger.new MultiIO.new(STDOUT)
-    # make that a configurable settings in the YAML file
-    @log.level = Logger::DEBUG
+    @log = Logger.new STDOUT
+    raise 'Log level not defined in config' unless conf['LogLevel'] >= 0 and conf['LogLevel'] <= 5
+    @log.level = conf['LogLevel']
     @log.progname = 'VolcanoFTP'
     @log.formatter = proc do |severity, datetime, progname, msg|
       "[#{datetime} ##{Process.pid}] #{severity} -- #{progname}: #{msg}\n"
     end
-    @log.info "Server is listening on port #{@port}"
+    ip = @bind.nil? ? '127.0.0.1' : @bind
+    @log.info "Server is listening on port #{@port} on #{ip}"
   end
 
   def config_yaml
-  yaml_content = YAML.load_file('conf.yml')
-     if yaml_content["Port"].nil?
+    yaml_content = YAML.load_file('conf.yml')
+    if yaml_content['Port'].nil?
       @port = 21
-      raise 'Port not defined.Port 21 used'
     else
-      if Process.euid != 0 and yaml_content["Port"] < 1024
-        raise 'You need root privilege to bind on port < 1024'
-      else
-      @port = yaml_content["Port"]
+      @port = yaml_content['Port']
     end
+    if Process.euid != 0 and @port < 1024
+      raise 'You need root privilege to bind on port < 1024'
     end
-    @bind = yaml_content["Bind"]
-    if File.directory? yaml_content["Dir"]
-        @rootFolder = yaml_content["Dir"]
+    @bind = yaml_content['Bind']
+    if File.directory? yaml_content['Dir']
+      @rootFolder = yaml_content['Dir']
     else
-      @rootFolder = '/'
+      raise "'#{yaml_content['dir']}' is not a correct directory"
     end
+    return yaml_content
   end
 
   def run
-    while (42)
+    while 42
       selectResult = IO.select([@socket], nil, nil, 1)
-      if selectResult == nil or selectResult[0].include?(@socket) == false
-        @pids.each do |pid|
-          unless Process.waitpid(pid, Process::WNOHANG).nil?
-            # Gather data/stats here for last terminated process
-            # puts "deleteting pid #{pid}"
-            @pids.delete(pid)
+      @cs,  = @socket.accept
+      peeraddr = @cs.peeraddr.dup
+      Kernel.fork do
+        begin
+          @logintime = Time.now
+          @sessionid = SecureRandom.hex(10)
+          @fileXml = Nokogiri::XML::DocumentFragment.parse ''
+          @file_node = Nokogiri::XML::Node.new('file', @fileXml)
+          @filecount = 0
+          handle_client
+        rescue SignalException => e
+          @log.warn "Caught signal #{e}"
+          unexpected
+        rescue Exception => e
+          @log.fatal "Encountered Exception : #{e}"
+          unexpected
+        ensure
+          logouttime = Time.now
+          duration = logouttime - @logintime
+          if File.exist?('stat.xml')
+            xmlFile = File.read('stat.xml')
+          else
+            xmlFile = '<volcano></volcano>'
           end
-        end
-      else
-        @cs,  = @socket.accept
-        peeraddr = @cs.peeraddr.dup
-        @pids << Kernel.fork do
-          begin
-            handle_client
-          rescue SignalException => e
-            @log.warn "Caught signal #{e}"
-            unexpected
-          rescue Exception => e
-            @log.fatal "Encountered Exception : #{e}"
-            unexpected
-          ensure
-            @log.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
-            @cs.close
-            Kernel.exit!
+          xmlData = Nokogiri::XML.parse xmlFile
+          session_node = Nokogiri::XML::Node.new('session', xmlData)
+          logintime_node = Nokogiri::XML::Node.new('logintime', xmlData)
+          logouttime_node = Nokogiri::XML::Node.new('logouttime', xmlData)
+          duration_node = Nokogiri::XML::Node.new('duration', xmlData)
+          filecount_node = Nokogiri::XML::Node.new('filecount', xmlData)
+
+          session_node['id'] = @sessionid
+          logintime_node.content = @logintime
+          logouttime_node.content = logouttime
+          duration_node.content = duration
+          filecount_node.content = @filecount
+
+          session_node << logintime_node
+          session_node << logouttime_node
+          session_node << duration_node
+          @file_node << filecount_node
+          session_node << @file_node
+          xmlData.root << session_node
+
+          File.open('stat.xml', 'w') do |file|
+            file.print xmlData.to_xml
           end
+
+          @log.info "Killing connection from #{peeraddr[2]}:#{peeraddr[1]}"
+          @cs.close
+          Kernel.exit!
         end
       end
     end
@@ -89,12 +118,9 @@ class VolcanoFtp
 
   def handle_client
     @log.info "Instanciating connection from #{@cs.peeraddr[2]}:#{@cs.peeraddr[1]}"
-    send_to_client_and_log(220, "Connected to VolcanoFTP")
+    send_to_client_and_log(220, 'Connected to VolcanoFTP')
     # client connection is on his root folder
     @cwd = '/'
-    # rootFolder HAS to be absolute path
-    # if yaml config is done, we need to be sure we have an absolute path
-       # TEMP to test FTP server
     until (line = @cs.gets).nil?
       unless line.end_with? "\r\n"
         @log.warn "[server<-client]: #{line}"
@@ -138,6 +164,10 @@ class VolcanoFtp
       @tport = nil
       dataIO.close
       @log.info "Transfered #{transfered_bytes} bytes"
+      file = Nokogiri::XML::Node.new("file#{@filecount}_size", @fileXml)
+      file.content = transfered_bytes
+      @file_node << file
+      @filecount += 1
     end
     send_to_client_and_log(226, 'Done')
   end
@@ -165,6 +195,10 @@ class VolcanoFtp
       @tport = nil
       dataIO.close
       @log.info "Received #{transfered_bytes} bytes"
+      file = Nokogiri::XML::Node.new("file#{@filecount}_size", @fileXml)
+      file.content = transfered_bytes
+      @file_node << file
+      @filecount += 1
     end
     send_to_client_and_log(226, 'Done')
   end
@@ -211,7 +245,7 @@ class VolcanoFtp
     file = @rootFolder + File.expand_path(args.join(' '), @cwd)
     @log.debug file
     return send_to_client_and_log(451, 'Dir not found') unless File.exist?(File.dirname(file))
-#    return send_to_client_and_log(451, 'File name already exist') if File.exist? file
+    #    return send_to_client_and_log(451, 'File name already exist') if File.exist? file
     io = File.open(file, 'wb')
     receive_data(io)
   end
@@ -312,20 +346,6 @@ class VolcanoFtp
 
 end
 
-class MultiIO
-  def initialize(*targets)
-    @targets = targets
-  end
-
-  def write(*args)
-    @targets.each {|t| t.write(*args)}
-  end
-
-  def close
-    @targets.each(&:close)
-  end
-end
-
 # Main
 
 # to kill all process if needed, we use a specific name
@@ -333,7 +353,7 @@ $0 = 'volcanoFTP'
 
 begin
   # using standart FTP port if none is specified in CLI
-  ftp = VolcanoFtp.new()
+  ftp = VolcanoFtp.new
   ftp.run
 rescue SystemExit, Interrupt
   puts 'Caught CTRL+C, exiting'
@@ -342,5 +362,5 @@ rescue RuntimeError => e
 end
 
 # killing all forked processes
-puts "Killing all processes now..."
+puts 'Killing all processes now...'
 `pkill volcanoFTP`

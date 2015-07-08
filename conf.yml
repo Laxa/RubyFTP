@@ -1,4 +1,4 @@
-Port :		21
-Bind :		1225
-Dir :		/
-Log:            DEBUG
+Port :		1025
+Bind :		127.0.0.1
+Dir :		/Users/laxa/Documents/
+LogLevel :      0               # 0 is for debug 5 is for prod
