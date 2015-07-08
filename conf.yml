@@ -1,3 +1,4 @@
 Port :		21
 Bind :		1225
 Dir :		/
+Log:            DEBUG
